@@ -1,2 +1,4 @@
-/venv
+/.venv
 .env
+applications_ledger.md
+.pipeline_state.json
