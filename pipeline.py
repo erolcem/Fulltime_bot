@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import asyncio
 import json
 import os
@@ -45,8 +46,10 @@ class JobIngestor:
         # Search parameters for Melbourne-based robotics/engineering roles
         params = {
             "engine": "google_jobs",
-            "q": "graduate OR junior engineer robotics OR kinematics OR control systems",
-            "location": "Melbourne, Victoria, Australia",
+            "q": "Graduate Engineer OR Robotics Engineer OR Control Systems",
+            "location": "Melbourne, VIC, Australia",
+            "gl": "au",
+            "hl": "en",
             "api_key": self.api_key
         }
         
