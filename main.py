@@ -104,12 +104,16 @@ async def run() -> None:
         log.info("Sources enabled: %s", [s.name for s in sources])
 
         # --- Phase 1: ingestion (all sources in parallel) -----------------
+        # --- Phase 1: ingestion (all sources in parallel) -----------------
         log.info("--- Phase 1: ingestion ---")
-        jobs = await collect_jobs(sources)
-        new_jobs = [j for j in jobs if not state.has(j.job_id)]
+        
+        # We pass the historical state directly into the ingestion engine. 
+        # This prevents it from even returning jobs we've seen on previous days.
+        new_jobs = await collect_jobs(sources, previously_seen_ids=state.ids)
+        
         log.info(
-            "%d new jobs to evaluate (%d skipped as already processed)",
-            len(new_jobs), len(jobs) - len(new_jobs),
+            "%d brand new jobs to evaluate (historical duplicates discarded at ingestion)",
+            len(new_jobs)
         )
         if not new_jobs:
             log.info("Nothing new. Exiting.")

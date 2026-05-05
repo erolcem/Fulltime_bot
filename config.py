@@ -37,7 +37,10 @@ def _bool(name: str, default: bool) -> bool:
 #
 # To find a Lever slug: same drill, look for "jobs.lever.co/<slug>".
 
+# ---- Curated AU tech & deep-tech company boards ---------------------------
+
 DEFAULT_GREENHOUSE_COMPANIES: Tuple[str, ...] = (
+    # --- Software & Fintech Unicorns ---
     "cultureamp",        # Culture Amp - Melbourne HQ
     "safetyculture",     # SafetyCulture - Sydney/Townsville
     "canva",             # Canva - Sydney
@@ -53,13 +56,44 @@ DEFAULT_GREENHOUSE_COMPANIES: Tuple[str, ...] = (
     "zeller",            # Zeller - Melbourne (fintech)
     "buildkite",         # Buildkite - Melbourne (CI/CD)
     "go1",               # Go1 - Brisbane (edtech)
+    "xero",              # Xero - Melbourne/NZ
+    "afterpay",          # Afterpay / Block - Melbourne
+    "squareup",          # Square (Block) - Melbourne
+    "zendesk",           # Zendesk - Huge Melbourne engineering hub
+    "siteminder",        # SiteMinder - Sydney
+    "eucalyptus",        # Eucalyptus - Sydney/Melbourne (HealthTech)
+    "harrisonai",        # Harrison.ai - Sydney (Health AI)
+    "mr-yum",            # Mr Yum / me&u - Melbourne
+    "airtasker",         # Airtasker - Sydney
+    
+    # --- Hardware, Robotics & Deep Tech (Highly Relevant) ---
+    "advancednavigation", # Advanced Navigation - Syd/Melb/Perth (Robotics, AI, Sensors)
+    "baraja",            # Baraja - Sydney (LiDAR for autonomous vehicles)
+    "morsemicro",        # Morse Micro - Sydney (Wi-Fi HaLow Silicon/Hardware)
+    "qctrl",             # Q-CTRL - Sydney (Quantum computing hardware/control systems)
+    "droneshield",       # DroneShield - Sydney (Hardware/Software for drone defense)
+    "fleetspace",        # Fleet Space - Adelaide (Satellites/Hardware)
+    "gilmourspace",      # Gilmour Space - Queensland (Aerospace/Rockets)
+    "fastbrickrobotics", # FBR - Perth (Construction Robotics - EXTREMELY relevant to your startup goal)
 )
 
 DEFAULT_LEVER_COMPANIES: Tuple[str, ...] = (
+    # --- Software & Platforms ---
     "rokt",              # Rokt - Sydney
     "envato",            # Envato - Melbourne
-    "atomos",            # Atomos - Melbourne (broadcast hardware)
+    "atlassian",         # Atlassian - Sydney/Remote (Uses Lever for some departments)
+    "hipages",           # HiPages - Sydney
+    "whogivesacrap",     # Who Gives A Crap - Melbourne
+    "petcircle",         # Pet Circle - Sydney/Remote
+    "brighte",           # Brighte - Sydney (Green energy fintech)
+    "skedsocial",        # Sked Social - Melbourne
+    "mable",             # Mable - Sydney
     "easygopost",
+    
+    # --- Hardware & Robotics ---
+    "atomos",            # Atomos - Melbourne (Broadcast hardware)
+    "swoopaero",         # Swoop Aero - Melbourne (Autonomous drone logistics / Hardware)
+    "vow",               # Vow - Sydney (Lab-grown meat, requires complex bio-reactor hardware/controls)
 )
 
 
@@ -101,7 +135,7 @@ class Config:
 
     # Adzuna
     adzuna_country: str = "au"
-    adzuna_max_days_old: int = 14
+    adzuna_max_days_old: int = 40
 
     # SerpApi-specific routing
     serpapi_gl: str = "au"
@@ -122,26 +156,31 @@ class Config:
         "remote", "anywhere",
     ))
 
-    # Phase 1 query list - used by Adzuna + SerpApi (the ones that take a query).
-    # Greenhouse and Lever pull entire boards and filter by keyword post-hoc.
+    # Phase 1 query list - used by Adzuna + SerpApi.
+    # We use explicit bigraphs to prevent pulling tradie/technician roles.
     queries: Tuple[str, ...] = field(default_factory=lambda: (
-        "graduate engineer",
-        "junior engineer",
-        "graduate software engineer",
-        "junior software engineer",
         "robotics engineer",
-        "embedded engineer",
+        "mechatronics engineer",
+        "software engineer",
+        "embedded software",
+        "firmware engineer",
+        "electrical engineer",
+        "computer engineer",
+        "systems engineer",
+        "control systems engineer",
         "automation engineer",
-        "controls engineer",
-        "electrical engineer graduate",
-        "systems engineer graduate",
+        "hardware engineer",
+        "machine learning engineer",
+        "AI engineer",
     ))
-    # Keywords used to filter Greenhouse / Lever job titles. We're not paying
-    # per query on these endpoints, so we pull the whole board and grep titles.
+
+    # Keywords used to filter Greenhouse / Lever job titles. 
+    # Single words are safe here because we are already inside a tech company's domain.
     title_keywords: Tuple[str, ...] = field(default_factory=lambda: (
         "engineer", "engineering", "developer", "robotics", "embedded",
         "firmware", "systems", "controls", "automation", "hardware",
-        "graduate", "junior", "intern",
+        "graduate", "junior", "software", "computer", "ai", "electrical", 
+        "mechatronics", "machine learning", "ml", "algorithms", "perception"
     ))
 
 
@@ -155,7 +194,7 @@ def load_config() -> Config:
     use_adzuna = _bool("USE_ADZUNA", True)
     use_greenhouse = _bool("USE_GREENHOUSE", True)
     use_lever = _bool("USE_LEVER", True)
-    use_serpapi = _bool("USE_SERPAPI", False)
+    use_serpapi = _bool("USE_SERPAPI", True)
 
     adzuna_id = os.environ.get("ADZUNA_APP_ID", "")
     adzuna_key = os.environ.get("ADZUNA_APP_KEY", "")

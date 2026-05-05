@@ -2,13 +2,11 @@
 synthesizer.py
 --------------
 Phase 3: for matched roles, generate an executive summary AND a tailored
-cover letter in a SINGLE Gemini call returning JSON. This halves the quota
-burn vs. two separate calls, which matters on the 15 RPM free tier.
+cover letter in a SINGLE Gemini call returning JSON. 
 
-The candidate background below is grounded in the actual resume so the
-model has real evidence (project names, technologies, papers) to reference -
-this is the difference between a generic cover letter and one that proves
-specific capability.
+The candidate background is grounded in empirical evidence (project names, 
+technologies, papers) to force the LLM to generate highly specific, technically 
+dominant applications, completely devoid of standard recruiter fluff.
 """
 
 import json
@@ -20,11 +18,8 @@ from models import Job
 
 log = logging.getLogger(__name__)
 
-
 # ---- Candidate background -----------------------------------------------
-# This is the ground truth the synthesizer cross-references against the
-# job posting. Edit here when your resume changes; the prompt picks it up
-# automatically.
+# Ground truth for the synthesizer. 
 
 CANDIDATE_PROFILE = """\
 Erol Cemiloglu - Systems & Robotics Engineer, M.Sc. candidate at Monash University.
@@ -79,37 +74,34 @@ operating across the hardware/software boundary.
 """
 
 
-SYNTH_PROMPT = """You are drafting application material for the candidate described below.
+SYNTH_PROMPT = """You are drafting application material for an elite engineering candidate.
 Cross-reference the candidate's background with the job posting and produce a JSON object
-with EXACTLY two fields.
+matching EXACTLY this schema:
+
+{{
+  "executive_summary": "...",
+  "cover_letter": "..."
+}}
 
 FIELD: executive_summary
-  Exactly 3 sentences for the candidate's review.
-  Sentence 1: what the company does, in plain terms.
-  Sentence 2: the specific scope of this role.
-  Sentence 3: the strongest two or three concrete reasons this candidate fits, naming
-              actual projects or technologies from the candidate's background.
+  Exactly 3 sentences for the candidate's internal review.
+  Sentence 1: The company's core product/mission in plain terms.
+  Sentence 2: The specific technical scope of this role.
+  Sentence 3: The strongest two concrete reasons this candidate is a lethal match, naming actual technologies.
 
 FIELD: cover_letter
-  A tailored cover letter, 250-350 words. Open with "Dear Hiring Team," unless the posting
-  names a specific recruiter.
+  A tailored cover letter, 250-300 words. Open with "Dear Hiring Team," unless the posting names a recruiter.
 
-  Hard rules:
-  - Do NOT open with "I am writing to express my interest" or any equivalent cliche.
-    Open with a single specific match between this role and the candidate.
-  - Reference at least TWO concrete items from the candidate's background by name.
-    Examples of concrete items: AR4 arm and ROS 2 deployment at MindPerfect, EEG-controlled
-    BCI robotic arm with Motorola Solutions, ISARC 2026 paper, MindPerfect C++ optimisation
-    work with Valgrind/Google Benchmark, HPC workshop series with NVIDIA/NCI/Pawsey.
-    Tie each named item to a specific requirement in the posting.
-  - Use precise engineering vocabulary. Name specific tools, libraries, or techniques.
-  - Avoid filler vocabulary: "passionate", "exciting opportunity", "thrilled", "team player",
-    "dynamic", "synergy", "leverage". Avoid em-dashes; use periods or commas.
-  - Close with one sentence offering to discuss further, then sign off:
+  HARD RULES for the Cover Letter:
+  - THE HOOK: The very first sentence MUST immediately state a technical intersection between the candidate's physical engineering expertise and the company's core product. (Example: "Building robust autonomous systems requires tight integration across hardware, ROS 2, and embedded C++—challenges I am currently solving with Universal Robots and aim to bring to [Company].") Do NOT use cliches like "I am writing to express my interest".
+  - EVIDENCE: Reference at least TWO concrete items from the candidate's background by name (e.g., AR4 arm, ISARC 2026 paper, Valgrind/Google Benchmark optimization, BCI Kafka pipeline). Tie each item to a specific requirement in the posting.
+  - TONE: Assertive, highly technical, and precise. Avoid em-dashes.
+  - BANNED WORDS: "passionate", "exciting opportunity", "thrilled", "team player", "dynamic", "synergy", "leverage", "delighted". 
+  - CLOSING: Close with exactly one sentence offering to discuss further, followed by:
         Kind regards,
         Erol Cemiloglu
 
-Output ONLY the JSON object - no markdown fences, no preamble, no trailing commentary.
+Output ONLY the JSON object.
 
 CANDIDATE BACKGROUND:
 {profile}
@@ -133,12 +125,14 @@ async def synthesize(client: GeminiClient, job: Job) -> Tuple[str, str]:
         requirements=job.requirements or "(not specified in posting)",
         description=(job.description or "")[:6000],
     )
+    
+    # expect_json=True triggers the application/json MIME type in the client
     raw = await client.generate(prompt, expect_json=True)
 
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        # Sometimes models still wrap in fences despite instructions.
+        # Fallback defensive parsing
         cleaned = raw.strip().strip("`").lstrip("json").strip()
         try:
             data = json.loads(cleaned)
@@ -152,6 +146,8 @@ async def synthesize(client: GeminiClient, job: Job) -> Tuple[str, str]:
 
     summary = (data.get("executive_summary") or "").strip()
     letter = (data.get("cover_letter") or "").strip()
+    
     if not summary or not letter:
         log.warning("Synthesizer returned incomplete fields for %s", job.title)
+        
     return summary, letter

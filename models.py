@@ -20,7 +20,7 @@ class Job:
     posted_at: str = ""
     due_date: Optional[str] = None
     apply_url: str = ""
-    source: str = "serpapi"
+    source: str = "unknown"
 
     def to_dict(self) -> dict:
         return asdict(self)

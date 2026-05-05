@@ -116,39 +116,48 @@ class AdzunaSource(JobSource):
         return out
 
     async def _search(self, query: str) -> List[Job]:
-        url = f"{self.BASE_URL}/{self.country}/search/1"
-        params = {
-            "app_id": self.app_id,
-            "app_key": self.app_key,
-            "what": query,
-            "where": self.location,
-            "results_per_page": self.results_per_page,
-            "max_days_old": self.max_days_old,
-            "sort_by": "date",
-            "content-type": "application/json",
-        }
-        try:
-            async with self.session.get(url, params=params, timeout=30) as resp:
-                if resp.status != 200:
-                    body = await resp.text()
-                    log.error("[adzuna] HTTP %d for '%s': %s", resp.status, query, body[:200])
-                    return []
-                data = await resp.json()
-        except Exception as e:
-            log.error("[adzuna] request failed for '%s': %s", query, e)
-            return []
-
-        items = data.get("results") or []
-        if not items:
-            log.warning("  [adzuna] query='%s' -> 0 jobs", query)
-            return []
-
         jobs: List[Job] = []
-        for item in items:
-            j = self._to_job(item)
-            if j:
-                jobs.append(j)
-        log.info("  [adzuna] query='%s' -> %d jobs", query, len(jobs))
+        max_pages = 3  # Prevent infinite loops, grabs up to 150 jobs per query
+        
+        for page in range(1, max_pages + 1):
+            url = f"{self.BASE_URL}/{self.country}/search/{page}"
+            params = {
+                "app_id": self.app_id,
+                "app_key": self.app_key,
+                "what": query,
+                "where": self.location,
+                "results_per_page": self.results_per_page,
+                "max_days_old": self.max_days_old,
+                "sort_by": "date",
+                "content-type": "application/json",
+            }
+            try:
+                async with self.session.get(url, params=params, timeout=30) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        log.error("[adzuna] HTTP %d for '%s': %s", resp.status, query, body[:200])
+                        break # Stop paginating on error
+                    data = await resp.json()
+            except Exception as e:
+                log.error("[adzuna] request failed for '%s': %s", query, e)
+                break
+
+            items = data.get("results") or []
+            if not items:
+                break  # Reached the end of the results
+
+            page_jobs = 0
+            for item in items:
+                j = self._to_job(item)
+                if j:
+                    jobs.append(j)
+                    page_jobs += 1
+            
+            # If a page returns fewer items than the max, we've hit the end
+            if len(items) < self.results_per_page:
+                break
+                
+        log.info("  [adzuna] query='%s' -> %d jobs across pages", query, len(jobs))
         return jobs
 
     @staticmethod
@@ -198,10 +207,11 @@ class GreenhouseSource(JobSource):
         self.companies = list(companies)
         self.title_keywords = list(title_keywords)
         self.location_filters = list(location_filters)
+        # The Governor: strictly limit to 5 concurrent connections to prevent 429s
+        self.semaphore = asyncio.Semaphore(5) 
 
     async def fetch(self) -> List[Job]:
-        # Companies are independent - fetch in parallel.
-        tasks = [self._fetch_company(c) for c in self.companies]
+        tasks = [self._fetch_company_throttled(c) for c in self.companies]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         out: List[Job] = []
         for company, res in zip(self.companies, results):
@@ -210,6 +220,11 @@ class GreenhouseSource(JobSource):
                 continue
             out.extend(res)
         return out
+
+    async def _fetch_company_throttled(self, slug: str) -> List[Job]:
+        # This forces tasks to wait in line if 5 are already running
+        async with self.semaphore:
+            return await self._fetch_company(slug)
 
     async def _fetch_company(self, slug: str) -> List[Job]:
         url = f"{self.BASE_URL}/{slug}/jobs"
@@ -299,17 +314,24 @@ class LeverSource(JobSource):
         self.companies = list(companies)
         self.title_keywords = list(title_keywords)
         self.location_filters = list(location_filters)
+        # The Governor: strictly limit to 5 concurrent connections to prevent 429s
+        self.semaphore = asyncio.Semaphore(5) 
 
     async def fetch(self) -> List[Job]:
-        tasks = [self._fetch_company(c) for c in self.companies]
+        tasks = [self._fetch_company_throttled(c) for c in self.companies]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         out: List[Job] = []
         for company, res in zip(self.companies, results):
             if isinstance(res, Exception):
-                log.error("[lever] %s failed: %s", company, res)
+                log.error("[greenhouse] %s failed: %s", company, res)
                 continue
             out.extend(res)
         return out
+
+    async def _fetch_company_throttled(self, slug: str) -> List[Job]:
+        # This forces tasks to wait in line if 5 are already running
+        async with self.semaphore:
+            return await self._fetch_company(slug)
 
     async def _fetch_company(self, slug: str) -> List[Job]:
         url = f"{self.BASE_URL}/{slug}"
@@ -507,25 +529,23 @@ class SerpApiSource(JobSource):
 # Orchestration
 # ============================================================================
 
-async def collect_jobs(sources: Sequence[JobSource]) -> List[Job]:
+async def collect_jobs(sources: Sequence[JobSource], previously_seen_ids: set[str] = None) -> List[Job]:
     """
-    Fetch from every source (in parallel where possible) and merge with dedup.
-
-    Sources expose `.fetch()` and decide their own iteration. Dedup is by
-    Job.job_id (content hash of title|company|location), so the same role on
-    multiple sources collapses to one entry.
+    Fetch from every source, merge, and heavily deduplicate.
+    Checks against both the current run AND historical runs (previously_seen_ids).
     """
     if not sources:
         return []
 
-    # Run all sources concurrently. Each source internally handles its own
-    # iteration (Adzuna walks queries, Greenhouse walks company slugs, etc).
+    if previously_seen_ids is None:
+        previously_seen_ids = set()
+
     results = await asyncio.gather(
         *[s.fetch() for s in sources],
         return_exceptions=True,
     )
 
-    seen: set[str] = set()
+    seen: set[str] = set(previously_seen_ids) # Initialize with historical data
     out: List[Job] = []
     per_source: dict[str, int] = {}
 
@@ -534,15 +554,16 @@ async def collect_jobs(sources: Sequence[JobSource]) -> List[Job]:
             log.error("Source %s failed: %s", source.name, res)
             per_source[source.name] = 0
             continue
+        
         count = 0
         for j in res:
             if j.job_id in seen:
-                continue
+                continue # Skip if seen in THIS run OR historical runs
             seen.add(j.job_id)
             out.append(j)
             count += 1
         per_source[source.name] = count
 
     breakdown = ", ".join(f"{k}={v}" for k, v in per_source.items())
-    log.info("Collected %d unique jobs (%s)", len(out), breakdown)
+    log.info("Collected %d brand new unique jobs (%s)", len(out), breakdown)
     return out
